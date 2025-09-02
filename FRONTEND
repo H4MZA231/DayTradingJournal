@@ -1,0 +1,71 @@
+/**
+ * Professional Trading Journal - Type Definitions
+ * =============================================
+ */
+
+import { Database } from '@/integrations/supabase/types';
+
+// Core Trading Types
+export type Trade = Database['public']['Tables']['trades']['Row'];
+export type TradeInsert = Database['public']['Tables']['trades']['Insert'];
+export type TradeUpdate = Database['public']['Tables']['trades']['Update'];
+
+// Daily P&L Types
+export type DailyPnL = Database['public']['Tables']['daily_pnl']['Row'];
+export type DailyPnLInsert = Database['public']['Tables']['daily_pnl']['Insert'];
+
+// Profit Target Types
+export type ProfitTarget = Database['public']['Tables']['profit_targets']['Row'];
+export type ProfitTargetInsert = Database['public']['Tables']['profit_targets']['Insert'];
+
+// User Profile Types
+export type Profile = Database['public']['Tables']['profiles']['Row'];
+
+// Trading Enums
+export type TradeType = 'buy' | 'sell';
+export type TradeStatus = 'open' | 'closed';
+export type TargetType = 'daily' | 'weekly' | 'monthly';
+
+// Currency Pairs Configuration
+export const CURRENCY_PAIRS = [
+  'EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'AUD/USD', 'USD/CAD',
+  'NZD/USD', 'EUR/GBP', 'EUR/JPY', 'GBP/JPY', 'CHF/JPY', 'EUR/AUD',
+  'EUR/CAD', 'GBP/AUD', 'GBP/CAD', 'AUD/JPY', 'CAD/JPY', 'NZD/JPY'
+] as const;
+
+export type CurrencyPair = typeof CURRENCY_PAIRS[number];
+
+// Trading Statistics Interface
+export interface TradingStatistics {
+  totalPnL: number;
+  winRate: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  averageWin: number;
+  averageLoss: number;
+  riskRewardRatio: number;
+  weeklyPnL: number;
+  yearlyPnL: number;
+}
+
+// API Response Types
+export interface APIResponse<T = any> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  message?: string;
+}
+
+// Trading Journal Configuration
+export interface TradingConfig {
+  defaultTargets: {
+    daily: number;
+    weekly: number;
+    monthly: number;
+  };
+  riskManagement: {
+    maxRiskPerTrade: number;
+    dailyLossLimit: number;
+  };
+}
