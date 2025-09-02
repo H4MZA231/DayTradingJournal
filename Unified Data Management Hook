@@ -1,0 +1,257 @@
+/**
+ * Professional Trading Journal - Unified Trading Data Hook
+ * =======================================================
+ */
+
+import { useEffect, useState, useCallback } from 'react';
+import { useAuth } from './useAuth';
+import { TradingAPI } from '@/services/api';
+import { Trade, TradeInsert, TradeUpdate, TradingStatistics, DailyPnL, ProfitTarget } from '@/types/trading';
+import { toast } from 'sonner';
+
+interface UseTradingDataReturn {
+  // Data States
+  trades: Trade[];
+  dailyPnL: DailyPnL[];
+  profitTargets: ProfitTarget[];
+  statistics: TradingStatistics;
+  
+  // Loading States
+  loading: boolean;
+  tradesLoading: boolean;
+  statisticsLoading: boolean;
+  
+  // Trade Operations
+  addTrade: (tradeData: Omit<TradeInsert, 'user_id'>) => Promise<{ data: Trade | null; error: any }>;
+  updateTrade: (id: string, updates: Partial<TradeUpdate>) => Promise<{ data: Trade | null; error: any }>;
+  deleteTrade: (id: string) => Promise<{ error: any }>;
+  closeTrade: (id: string, exitPrice: number) => Promise<{ data: Trade | null; error: any }>;
+  
+  // Data Operations
+  refreshAll: () => Promise<void>;
+  refreshTrades: () => Promise<void>;
+  refreshStatistics: () => Promise<void>;
+  updateTargets: () => Promise<void>;
+}
+
+export function useTradingData(): UseTradingDataReturn {
+  const { user } = useAuth();
+  
+  // Data States
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [dailyPnL, setDailyPnL] = useState<DailyPnL[]>([]);
+  const [profitTargets, setProfitTargets] = useState<ProfitTarget[]>([]);
+  const [statistics, setStatistics] = useState<TradingStatistics>({
+    totalPnL: 0,
+    winRate: 0,
+    totalTrades: 0,
+    winningTrades: 0,
+    losingTrades: 0,
+    averageWin: 0,
+    averageLoss: 0,
+    riskRewardRatio: 0,
+    weeklyPnL: 0,
+    yearlyPnL: 0
+  });
+  
+  // Loading States
+  const [loading, setLoading] = useState(true);
+  const [tradesLoading, setTradesLoading] = useState(true);
+  const [statisticsLoading, setStatisticsLoading] = useState(true);
+
+  /**
+   * ==================
+   * DATA FETCHING
+   * ==================
+   */
+
+  const fetchTrades = useCallback(async () => {
+    if (!user) return;
+
+    setTradesLoading(true);
+    try {
+      const response = await TradingAPI.fetchTrades(user.id);
+      
+      if (response.success && response.data) {
+        setTrades(response.data);
+      } else {
+        toast.error(response.error || 'Failed to fetch trades');
+      }
+    } catch (error) {
+      console.error('Error in fetchTrades:', error);
+      toast.error('Failed to fetch trades');
+    } finally {
+      setTradesLoading(false);
+    }
+  }, [user]);
+
+  const calculateStatistics = useCallback(() => {
+    setStatisticsLoading(true);
+    try {
+      const stats = TradingAPI.calculateTradingStatistics(trades);
+      setStatistics(stats);
+    } catch (error) {
+      console.error('Error calculating statistics:', error);
+    } finally {
+      setStatisticsLoading(false);
+    }
+  }, [trades]);
+
+  /**
+   * ==================
+   * TRADE OPERATIONS
+   * ==================
+   */
+
+  const addTrade = async (tradeData: Omit<TradeInsert, 'user_id'>) => {
+    if (!user) return { data: null, error: 'User not authenticated' };
+
+    try {
+      const response = await TradingAPI.createTrade({
+        ...tradeData,
+        user_id: user.id
+      });
+
+      if (response.success && response.data) {
+        setTrades(prev => [response.data!, ...prev]);
+        toast.success('Trade added successfully');
+        return { data: response.data, error: null };
+      } else {
+        toast.error(response.error || 'Failed to add trade');
+        return { data: null, error: response.error };
+      }
+    } catch (error) {
+      console.error('Error adding trade:', error);
+      toast.error('Failed to add trade');
+      return { data: null, error };
+    }
+  };
+
+  const updateTrade = async (id: string, updates: Partial<TradeUpdate>) => {
+    if (!user) return { data: null, error: 'User not authenticated' };
+
+    try {
+      const response = await TradingAPI.updateTrade(id, updates);
+
+      if (response.success && response.data) {
+        setTrades(prev => prev.map(trade => trade.id === id ? response.data! : trade));
+        toast.success('Trade updated successfully');
+        return { data: response.data, error: null };
+      } else {
+        toast.error(response.error || 'Failed to update trade');
+        return { data: null, error: response.error };
+      }
+    } catch (error) {
+      console.error('Error updating trade:', error);
+      toast.error('Failed to update trade');
+      return { data: null, error };
+    }
+  };
+
+  const deleteTrade = async (id: string) => {
+    if (!user) return { error: 'User not authenticated' };
+
+    try {
+      const response = await TradingAPI.deleteTrade(id, user.id);
+
+      if (response.success) {
+        setTrades(prev => prev.filter(trade => trade.id !== id));
+        toast.success('Trade deleted successfully');
+        return { error: null };
+      } else {
+        toast.error(response.error || 'Failed to delete trade');
+        return { error: response.error };
+      }
+    } catch (error) {
+      console.error('Error deleting trade:', error);
+      toast.error('Failed to delete trade');
+      return { error };
+    }
+  };
+
+  const closeTrade = async (id: string, exitPrice: number) => {
+    return updateTrade(id, { exit_price: exitPrice, status: 'closed' });
+  };
+
+  /**
+   * ==================
+   * REFRESH OPERATIONS
+   * ==================
+   */
+
+  const refreshTrades = useCallback(async () => {
+    await fetchTrades();
+  }, [fetchTrades]);
+
+  const refreshStatistics = useCallback(async () => {
+    calculateStatistics();
+  }, [calculateStatistics]);
+
+  const refreshAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      await fetchTrades();
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchTrades]);
+
+  const updateTargets = async () => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase.rpc('update_profit_targets', {
+        p_user_id: user.id
+      });
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error updating targets:', error);
+    }
+  };
+
+  /**
+   * ==================
+   * EFFECTS
+   * ==================
+   */
+
+  // Initial data load
+  useEffect(() => {
+    if (user) {
+      refreshAll();
+    }
+  }, [user, refreshAll]);
+
+  // Recalculate statistics when trades change
+  useEffect(() => {
+    calculateStatistics();
+  }, [calculateStatistics]);
+
+  return {
+    // Data States
+    trades,
+    dailyPnL,
+    profitTargets,
+    statistics,
+    
+    // Loading States
+    loading,
+    tradesLoading,
+    statisticsLoading,
+    
+    // Trade Operations
+    addTrade,
+    updateTrade,
+    deleteTrade,
+    closeTrade,
+    
+    // Data Operations
+    refreshAll,
+    refreshTrades,
+    refreshStatistics,
+    updateTargets
+  };
+}
