@@ -1,0 +1,309 @@
+/**
+ * Professional Trading Journal - Backend API
+ * ==========================================
+ */
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+// CORS Configuration
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS'
+};
+
+// API Response Interface
+interface APIResponse {
+  success: boolean;
+  data?: any;
+  error?: string;
+  message?: string;
+}
+
+// Request Interface
+interface TradingRequest {
+  action: string;
+  data?: any;
+  user_id?: string;
+}
+
+/**
+ * ==================
+ * MAIN HANDLER
+ * ==================
+ */
+serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
+  try {
+    // Initialize Supabase client
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+
+    // Parse request
+    const { action, data, user_id }: TradingRequest = await req.json();
+
+    console.log(`Processing action: ${action} for user: ${user_id}`);
+
+    // Route to appropriate handler
+    let response: APIResponse;
+
+    switch (action) {
+      case 'calculate_pnl':
+        response = await calculatePnL(supabase, data);
+        break;
+      
+      case 'bulk_update_targets':
+        response = await bulkUpdateTargets(supabase, data);
+        break;
+      
+      case 'get_trading_analytics':
+        response = await getTradingAnalytics(supabase, data);
+        break;
+      
+      case 'validate_trade':
+        response = await validateTrade(data);
+        break;
+      
+      case 'close_trade_batch':
+        response = await closeTradesBatch(supabase, data);
+        break;
+      
+      case 'export_trading_data':
+        response = await exportTradingData(supabase, data);
+        break;
+
+      default:
+        response = {
+          success: false,
+          error: `Unknown action: ${action}`,
+          message: 'Please check the API documentation for available actions'
+        };
+    }
+
+    return new Response(
+      JSON.stringify(response),
+      { 
+        status: response.success ? 200 : 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      }
+    );
+
+  } catch (error) {
+    console.error('Trading API Error:', error);
+    
+    const errorResponse: APIResponse = {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+      message: 'Internal server error'
+    };
+
+    return new Response(
+      JSON.stringify(errorResponse),
+      { 
+        status: 500, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      }
+    );
+  }
+});
+
+/**
+ * ==================
+ * API HANDLERS
+ * ==================
+ */
+
+/**
+ * Calculate P&L for a trade
+ */
+async function calculatePnL(supabase: any, data: any): Promise<APIResponse> {
+  try {
+    const { entry_price, exit_price, size, type, pair } = data;
+
+    // Validate required fields
+    if (!entry_price || !exit_price || !size || !type || !pair) {
+      return {
+        success: false,
+        error: 'Missing required fields for P&L calculation'
+      };
+    }
+
+    // Use database function for calculation
+    const { data: result, error } = await supabase.rpc('calculate_trade_pnl', {
+      p_entry_price: entry_price,
+      p_exit_price: exit_price,
+      p_size: size,
+      p_type: type,
+      p_pair: pair
+    });
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      data: { pnl: result },
+      message: 'P&L calculated successfully'
+    };
+
+  } catch (error) {
+    return {
+      success: false,
+      error: `P&L calculation failed: ${error.message}`
+    };
+  }
+}
+
+/**
+ * Get comprehensive trading analytics
+ */
+async function getTradingAnalytics(supabase: any, data: any): Promise<APIResponse> {
+  try {
+    const { user_id, start_date, end_date } = data;
+
+    if (!user_id) {
+      return {
+        success: false,
+        error: 'user_id is required'
+      };
+    }
+
+    // Fetch trades data
+    let tradesQuery = supabase
+      .from('trades')
+      .select('*')
+      .eq('user_id', user_id)
+      .eq('status', 'closed');
+
+    if (start_date) tradesQuery = tradesQuery.gte('created_at', start_date);
+    if (end_date) tradesQuery = tradesQuery.lte('created_at', end_date);
+
+    const { data: trades, error: tradesError } = await tradesQuery;
+
+    if (tradesError) throw tradesError;
+
+    // Calculate analytics
+    const analytics = {
+      totalTrades: trades.length,
+      totalPnL: trades.reduce((sum: number, trade: any) => sum + (trade.pnl || 0), 0),
+      winningTrades: trades.filter((trade: any) => (trade.pnl || 0) > 0).length,
+      losingTrades: trades.filter((trade: any) => (trade.pnl || 0) < 0).length,
+      largestWin: Math.max(...trades.map((trade: any) => trade.pnl || 0), 0),
+      largestLoss: Math.min(...trades.map((trade: any) => trade.pnl || 0), 0),
+      currencyPairBreakdown: getCurrencyPairBreakdown(trades),
+      monthlyPerformance: getMonthlyPerformance(trades)
+    };
+
+    return {
+      success: true,
+      data: analytics,
+      message: 'Analytics calculated successfully'
+    };
+
+  } catch (error) {
+    return {
+      success: false,
+      error: `Analytics calculation failed: ${error.message}`
+    };
+  }
+}
+
+/**
+ * Validate trade data before insertion
+ */
+async function validateTrade(data: any): Promise<APIResponse> {
+  try {
+    const { entry_price, exit_price, size, type, pair, status } = data;
+
+    const errors = [];
+
+    // Required field validation
+    if (!entry_price || entry_price <= 0) {
+      errors.push('Entry price must be greater than 0');
+    }
+
+    if (status === 'closed' && (!exit_price || exit_price <= 0)) {
+      errors.push('Exit price must be greater than 0 for closed trades');
+    }
+
+    if (!size || size <= 0) {
+      errors.push('Position size must be greater than 0');
+    }
+
+    if (!type || !['buy', 'sell'].includes(type)) {
+      errors.push('Trade type must be either "buy" or "sell"');
+    }
+
+    if (!pair || pair.length < 6) {
+      errors.push('Invalid currency pair format');
+    }
+
+    // Business logic validation
+    if (size > 10) { // Max 10 lots
+      errors.push('Position size cannot exceed 10 lots');
+    }
+
+    if (errors.length > 0) {
+      return {
+        success: false,
+        error: errors.join(', '),
+        data: { validationErrors: errors }
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Trade data is valid',
+      data: { isValid: true }
+    };
+
+  } catch (error) {
+    return {
+      success: false,
+      error: `Validation failed: ${error.message}`
+    };
+  }
+}
+
+/**
+ * ==================
+ * UTILITY FUNCTIONS
+ * ==================
+ */
+
+function getCurrencyPairBreakdown(trades: any[]) {
+  const breakdown: { [key: string]: { trades: number; pnl: number } } = {};
+  
+  trades.forEach(trade => {
+    if (!breakdown[trade.pair]) {
+      breakdown[trade.pair] = { trades: 0, pnl: 0 };
+    }
+    breakdown[trade.pair].trades++;
+    breakdown[trade.pair].pnl += trade.pnl || 0;
+  });
+  
+  return breakdown;
+}
+
+function getMonthlyPerformance(trades: any[]) {
+  const monthly: { [key: string]: { trades: number; pnl: number } } = {};
+  
+  trades.forEach(trade => {
+    const date = new Date(trade.created_at);
+    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    
+    if (!monthly[monthKey]) {
+      monthly[monthKey] = { trades: 0, pnl: 0 };
+    }
+    monthly[monthKey].trades++;
+    monthly[monthKey].pnl += trade.pnl || 0;
+  });
+  
+  return monthly;
+}
