@@ -1,0 +1,178 @@
+/**
+ * Professional Trading Journal - API Service Layer
+ * ===============================================
+ */
+
+import { supabase } from '@/integrations/supabase/client';
+import { 
+  Trade, 
+  TradeInsert, 
+  TradeUpdate, 
+  DailyPnL, 
+  ProfitTarget, 
+  APIResponse,
+  TradingStatistics 
+} from '@/types/trading';
+
+export class TradingAPI {
+  /**
+   * ==================
+   * TRADES MANAGEMENT
+   * ==================
+   */
+
+  static async fetchTrades(userId: string): Promise<APIResponse<Trade[]>> {
+    try {
+      const { data, error } = await supabase
+        .from('trades')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data: data || [],
+        message: 'Trades fetched successfully'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch trades'
+      };
+    }
+  }
+
+  static async createTrade(tradeData: TradeInsert): Promise<APIResponse<Trade>> {
+    try {
+      const { data, error } = await supabase
+        .from('trades')
+        .insert(tradeData)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: 'Trade created successfully'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to create trade'
+      };
+    }
+  }
+
+  static async updateTrade(id: string, updates: TradeUpdate): Promise<APIResponse<Trade>> {
+    try {
+      const { data, error } = await supabase
+        .from('trades')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        data,
+        message: 'Trade updated successfully'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update trade'
+      };
+    }
+  }
+
+  static async deleteTrade(id: string, userId: string): Promise<APIResponse> {
+    try {
+      const { error } = await supabase
+        .from('trades')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        message: 'Trade deleted successfully'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to delete trade'
+      };
+    }
+  }
+
+  /**
+   * ==================
+   * ANALYTICS & STATS
+   * ==================
+   */
+
+  static calculateTradingStatistics(trades: Trade[]): TradingStatistics {
+    const closedTrades = trades.filter(trade => trade.status === 'closed');
+    const winningTrades = closedTrades.filter(trade => (trade.pnl || 0) > 0);
+    const losingTrades = closedTrades.filter(trade => (trade.pnl || 0) < 0);
+
+    const totalPnL = closedTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
+    const winRate = closedTrades.length > 0 ? (winningTrades.length / closedTrades.length) * 100 : 0;
+    
+    const averageWin = winningTrades.length > 0 
+      ? winningTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0) / winningTrades.length 
+      : 0;
+      
+    const averageLoss = losingTrades.length > 0 
+      ? losingTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0) / losingTrades.length 
+      : 0;
+
+    const riskRewardRatio = averageLoss !== 0 ? Math.abs(averageWin / averageLoss) : 0;
+
+    // Weekly and yearly calculations
+    const currentWeek = this.getWeekNumber(new Date());
+    const currentYear = new Date().getFullYear();
+    
+    const weeklyTrades = trades.filter(trade => {
+      const tradeDate = new Date(trade.created_at);
+      return this.getWeekNumber(tradeDate) === currentWeek && tradeDate.getFullYear() === currentYear;
+    });
+    
+    const yearlyTrades = trades.filter(trade => {
+      const tradeDate = new Date(trade.created_at);
+      return tradeDate.getFullYear() === currentYear;
+    });
+
+    const weeklyPnL = weeklyTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
+    const yearlyPnL = yearlyTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
+
+    return {
+      totalPnL,
+      winRate,
+      totalTrades: closedTrades.length,
+      winningTrades: winningTrades.length,
+      losingTrades: losingTrades.length,
+      averageWin,
+      averageLoss,
+      riskRewardRatio,
+      weeklyPnL,
+      yearlyPnL
+    };
+  }
+
+  private static getWeekNumber(date: Date): number {
+    const d = new Date(date.getTime());
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+    const week1 = new Date(d.getFullYear(), 0, 4);
+    return 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+  }
+}
