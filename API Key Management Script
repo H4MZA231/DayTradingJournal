@@ -1,0 +1,115 @@
+/**
+ * Professional Trading Journal - API Key Management Script
+ * =======================================================
+ */
+
+interface APIConfiguration {
+  supabaseUrl: string;
+  supabaseAnonKey: string;
+  supabaseServiceKey?: string;
+  environment: 'development' | 'production' | 'staging';
+}
+
+interface SecurityConfig {
+  encryptionKey?: string;
+  jwtSecret?: string;
+  corsOrigins: string[];
+  rateLimiting: {
+    enabled: boolean;
+    requestsPerMinute: number;
+  };
+}
+
+class APIKeyManager {
+  private config: APIConfiguration;
+  private securityConfig: SecurityConfig;
+
+  constructor() {
+    this.config = this.loadConfiguration();
+    this.securityConfig = this.loadSecurityConfig();
+  }
+
+  private loadConfiguration(): APIConfiguration {
+    return {
+      supabaseUrl: this.getEnvVar('SUPABASE_URL', 'https://kcdikpukagibbfuzmtgt.supabase.co'),
+      supabaseAnonKey: this.getEnvVar(
+        'SUPABASE_ANON_KEY', 
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtjZGlrcHVrYWdpYmJmdXptdGd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY0ODc2ODcsImV4cCI6MjA3MjA2MzY4N30.9-drSEK8AnXyGrrWw7iPAPHoX1M9bXEzNctdLliNDxIY'
+      ),
+      environment: 'development'
+    };
+  }
+
+  private getEnvVar(key: string, defaultValue?: string): string {
+    // Your environment variables configuration
+    const envVars: { [key: string]: string } = {
+      'SUPABASE_URL': 'https://kcdikpukagibbfuzmtgt.supabase.co',
+      'SUPABASE_ANON_KEY': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtjZGlrcHVrYWdpYmJmdXptdGd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY0ODc2ODcsImV4cCI6MjA3MjA2MzY4N30.9-drSEK8AnXyGrrWw7iPAPHoX1M9bXEzNctdLliNDxIY'
+    };
+
+    return envVars[key] || defaultValue || '';
+  }
+
+  generateClientConfig(): string {
+    return `/**
+ * Supabase Client Configuration
+ * Generated on: ${new Date().toISOString()}
+ * Environment: ${this.config.environment}
+ */
+
+export const supabaseConfig = {
+  url: "${this.config.supabaseUrl}",
+  anonKey: "${this.config.supabaseAnonKey}",
+  auth: {
+    storage: localStorage,
+    persistSession: true,
+    autoRefreshToken: true,
+  }
+};
+`;
+  }
+
+  generateEnvironmentFile(): string {
+    return `# Trading Journal Environment Configuration
+# Generated on: ${new Date().toISOString()}
+
+# Supabase Configuration
+SUPABASE_URL="${this.config.supabaseUrl}"
+SUPABASE_ANON_KEY="${this.config.supabaseAnonKey}"
+
+# Application Configuration
+ENVIRONMENT="${this.config.environment}"
+`;
+  }
+
+  runSetupWizard(): {
+    clientConfig: string;
+    environmentFile: string;
+  } {
+    console.log('🚀 Trading Journal API Setup Wizard');
+    console.log('===================================');
+
+    const clientConfig = this.generateClientConfig();
+    const environmentFile = this.generateEnvironmentFile();
+
+    console.log('📝 Configuration files generated successfully');
+
+    return {
+      clientConfig,
+      environmentFile
+    };
+  }
+}
+
+// Initialize API Key Manager
+const apiKeyManager = new APIKeyManager();
+
+// Run setup wizard
+const setupResult = apiKeyManager.runSetupWizard();
+
+// Export for use
+export { APIKeyManager, setupResult };
+
+console.log('\n🔧 API Configuration Status:');
+console.log(`Environment: ${apiKeyManager.getConfiguration().environment}`);
+console.log(`Supabase URL: ${apiKeyManager.getConfiguration().supabaseUrl}`);
